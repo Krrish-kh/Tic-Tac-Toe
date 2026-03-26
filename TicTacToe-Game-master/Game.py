@@ -22,6 +22,7 @@
 from __future__ import annotations
 
 import random
+import time
 import tkinter as tk
 from typing import Optional, Sequence
 
@@ -29,6 +30,7 @@ from typing import Optional, Sequence
 APP_TITLE = "Tic Tac Toe"
 BOT_THINK_DELAY_MS = 900
 BOT_MOVE_ANIM_MS = 70
+RESTART_SHORTCUT_WINDOW_SEC = 0.7
 WIN_LENGTH = 3
 
 WIN_LINES = (
@@ -234,12 +236,12 @@ class TicTacToeApp:
         self.root.minsize(980, 680)
 
         self.root.option_add("*Font", ("Segoe UI", 10))
-        self.root.bind("<Escape>", self.on_close)
-        self.root.bind("r", self.new_game)
-        self.root.bind("R", self.new_game)
-        self.root.bind("n", self.new_game)
-        self.root.bind("N", self.new_game)
-        self.root.bind("<space>", self.toggle_ai_mode)
+        self.root.bind_all("<Escape>", self.on_close)
+        self.root.bind_all("<KeyPress-r>", self._on_restart_key)
+        self.root.bind_all("<KeyPress-R>", self._on_restart_key)
+        self.root.bind_all("<KeyPress-n>", self._on_restart_button_key)
+        self.root.bind_all("<KeyPress-N>", self._on_restart_button_key)
+        self.root.bind_all("<space>", self._on_space_key)
 
         self.app_icon = build_app_icon(self.root)
         self.root.iconphoto(True, self.app_icon)
@@ -251,6 +253,7 @@ class TicTacToeApp:
         self.board = [""] * 9
         self.current_player = "X"
         self.ai_symbol: Optional[str] = None
+        self.cpu_vs_cpu = False
         self.game_over = False
         self.last_move_index: Optional[int] = None
         self.hover_index: Optional[int] = None
@@ -261,7 +264,35 @@ class TicTacToeApp:
         self.bot_move_anim_step = 0
         self.bot_move_anim_index: Optional[int] = None
         self.bot_move_anim_total = 0
+        self.backend_window: Optional[tk.Toplevel] = None
+        self.backend_cells: list[tk.Label] = []
+        self.backend_candidate_cells: list[tk.Label] = []
+        self.backend_pipeline_labels: list[tk.Label] = []
+        self.backend_log_lines: list[str] = []
+        self.backend_last_analysis: Optional[dict[str, object]] = None
+        self.backend_trace_data: Optional[dict[str, object]] = None
+        self.backend_trace_steps: list[dict[str, object]] = []
+        self.backend_trace_index = -1
+        self.backend_trace_job: Optional[str] = None
+        self.backend_trace_pending_move: Optional[int] = None
+        self.backend_status_var = tk.StringVar(value="Idle")
+        self.backend_detail_var = tk.StringVar(value="Waiting for the next AI turn.")
+        self.backend_move_var = tk.StringVar(value="No move selected yet.")
+        self.backend_phase_var = tk.StringVar(value="Board synchronized.")
+        self.backend_board_var = tk.StringVar(value="1 2 3 / 4 5 6 / 7 8 9")
+        self.backend_board_state_var = tk.StringVar(value='["", "", "", "", "", "", "", "", ""]')
+        self.backend_mode_state_var = tk.StringVar(value="Human vs Human")
+        self.backend_turn_state_var = tk.StringVar(value="X")
+        self.backend_alpha_var = tk.StringVar(value="alpha = -")
+        self.backend_beta_var = tk.StringVar(value="beta = -")
+        self.backend_nodes_var = tk.StringVar(value="nodes = 0")
+        self.backend_prunes_var = tk.StringVar(value="prunes = 0")
+        self.backend_best_var = tk.StringVar(value="best = -")
+        self.backend_choice_var = tk.StringVar(value="choice = pending")
+        self.backend_eval_var = tk.StringVar(value="evaluating: none")
+        self.backend_progress_var = tk.StringVar(value="0 / 0")
         self.scores = {"X": 0, "O": 0, "Draw": 0}
+        self._restart_shortcut_deadline = 0.0
 
         self.status_var = tk.StringVar()
         self.mode_var = tk.StringVar()
@@ -281,6 +312,7 @@ class TicTacToeApp:
         self._build_ui()
         self.maximize_window()
         self.new_game()
+        self.open_backend_window()
 
     def _build_tile_positions(self) -> list[tuple[int, int, int, int]]:
         positions = []
@@ -472,11 +504,17 @@ class TicTacToeApp:
         self.controls_card.pack(fill="x", pady=(0, 14))
         controls = self.controls_card_content
 
-        self.new_game_button = self._make_button(controls, "New Game", self.new_game, COLORS["accent_green"], COLORS["card_hover"])
+        self.new_game_button = self._make_button(controls, "New Game", self.trigger_new_game, COLORS["accent_green"], COLORS["card_hover"])
         self.new_game_button.pack(fill="x", pady=(0, 10))
 
         self.ai_button = self._make_button(controls, "Computer: Off", self.toggle_ai_mode, COLORS["accent_cyan"], COLORS["card_hover"])
         self.ai_button.pack(fill="x", pady=(0, 10))
+
+        self.cpu_button = self._make_button(controls, "Computer vs Computer: Off", self.toggle_cpu_vs_cpu_mode, COLORS["accent_gold"], COLORS["card_hover"])
+        self.cpu_button.pack(fill="x", pady=(0, 10))
+
+        self.backend_button = self._make_button(controls, "Backend Window", self.toggle_backend_window, COLORS["accent_gold"], COLORS["card_hover"])
+        self.backend_button.pack(fill="x", pady=(0, 10))
 
         self.exit_button = self._make_button(controls, "Exit", self.on_close, COLORS["accent_coral"], COLORS["card_hover"])
         self.exit_button.pack(fill="x")
@@ -486,6 +524,7 @@ class TicTacToeApp:
         hint_text = (
             "R or N  -  restart the board\n"
             "Space   -  toggle computer control\n"
+            "R + Space - computer vs computer\n"
             "Esc     -  close the app"
         )
         tk.Label(
@@ -654,9 +693,435 @@ class TicTacToeApp:
         except tk.TclError:
             self.root.geometry(f"{self.root.winfo_screenwidth()}x{self.root.winfo_screenheight()}+0+0")
 
+    def toggle_backend_window(self, event: Optional[tk.Event] = None) -> None:
+        del event
+        if self.backend_window is not None and self.backend_window.winfo_exists():
+            self.close_backend_window()
+        else:
+            self.open_backend_window()
+
+    def open_backend_window(self) -> None:
+        if self.backend_window is not None and self.backend_window.winfo_exists():
+            self.refresh_backend_window()
+            return
+
+        win = tk.Toplevel(self.root)
+        win.title("Backend Simulation")
+        win.configure(bg=COLORS["bg"])
+        win.geometry("560x860+40+40")
+        win.minsize(520, 760)
+        win.protocol("WM_DELETE_WINDOW", self.close_backend_window)
+        win.transient(self.root)
+        self.backend_window = win
+        self.backend_cells = []
+        self.backend_candidate_cells = []
+        self.backend_pipeline_labels = []
+
+        header = tk.Frame(win, bg=COLORS["bg"])
+        header.pack(fill="x", padx=16, pady=(16, 10))
+        tk.Label(header, text="Backend Simulation", bg=COLORS["bg"], fg=COLORS["text"], font=("Segoe UI Semibold", 20, "bold")).pack(anchor="w")
+        tk.Label(header, text="Live search debugger for board storage, candidate scoring, and move selection.", bg=COLORS["bg"], fg=COLORS["muted"], font=("Segoe UI", 10)).pack(anchor="w", pady=(4, 0))
+
+        meta = tk.Frame(win, bg=COLORS["panel"], highlightthickness=1, highlightbackground=COLORS["border"])
+        meta.pack(fill="x", padx=16, pady=(0, 12))
+        tk.Label(meta, textvariable=self.backend_phase_var, bg=COLORS["panel"], fg=COLORS["accent_cyan"], font=("Segoe UI Semibold", 10), padx=14, pady=10).pack(anchor="w")
+        tk.Label(meta, textvariable=self.backend_status_var, bg=COLORS["panel"], fg=COLORS["text"], font=("Segoe UI Semibold", 14, "bold"), padx=14).pack(anchor="w")
+        tk.Label(meta, textvariable=self.backend_detail_var, bg=COLORS["panel"], fg=COLORS["muted"], font=("Segoe UI", 10), wraplength=500, justify="left", padx=14, pady=4).pack(anchor="w")
+        tk.Label(meta, textvariable=self.backend_progress_var, bg=COLORS["panel"], fg=COLORS["accent_gold"], font=("Consolas", 10), padx=14).pack(anchor="w", pady=(2, 10))
+
+        pipeline_card = tk.Frame(win, bg=COLORS["panel"], highlightthickness=1, highlightbackground=COLORS["border"])
+        pipeline_card.pack(fill="x", padx=16, pady=(0, 12))
+        tk.Label(pipeline_card, text="DECISION PIPELINE", bg=COLORS["panel"], fg=COLORS["muted"], font=("Segoe UI Semibold", 9), anchor="w").pack(fill="x", padx=14, pady=(12, 8))
+        pipeline_wrap = tk.Frame(pipeline_card, bg=COLORS["panel"])
+        pipeline_wrap.pack(fill="x", padx=14, pady=(0, 14))
+        for step in ("Capture board", "Predict candidates", "Score branches", "Prune tree", "Choose move", "Apply move"):
+            row = tk.Frame(pipeline_wrap, bg=COLORS["panel"])
+            row.pack(fill="x", pady=2)
+            lamp = tk.Label(row, text="●", bg=COLORS["panel"], fg=COLORS["muted"], font=("Segoe UI", 10, "bold"), width=2)
+            lamp.pack(side="left")
+            label = tk.Label(row, text=step, bg=COLORS["panel"], fg=COLORS["muted"], font=("Segoe UI Semibold", 10))
+            label.pack(side="left")
+            self.backend_pipeline_labels.append(label)
+
+        board_card = tk.Frame(win, bg=COLORS["panel"], highlightthickness=1, highlightbackground=COLORS["border"])
+        board_card.pack(fill="x", padx=16, pady=(0, 12))
+        tk.Label(board_card, text="BOARD SNAPSHOT", bg=COLORS["panel"], fg=COLORS["muted"], font=("Segoe UI Semibold", 9), anchor="w").pack(fill="x", padx=14, pady=(12, 6))
+        tk.Label(board_card, textvariable=self.backend_board_state_var, bg=COLORS["panel"], fg=COLORS["accent_cyan"], font=("Consolas", 9), anchor="w", justify="left").pack(fill="x", padx=14)
+        board_grid = tk.Frame(board_card, bg=COLORS["panel"])
+        board_grid.pack(padx=14, pady=(10, 14))
+        for r in range(3):
+            for c in range(3):
+                cell = tk.Label(board_grid, text="", width=9, height=4, bg=COLORS["card"], fg=COLORS["text"], font=("Segoe UI Semibold", 14, "bold"), relief="flat", bd=0, highlightthickness=1, highlightbackground=COLORS["border"], justify="center")
+                cell.grid(row=r, column=c, padx=4, pady=4, sticky="nsew")
+                board_grid.grid_columnconfigure(c, weight=1)
+                board_grid.grid_rowconfigure(r, weight=1)
+                self.backend_cells.append(cell)
+
+        stats_card = tk.Frame(win, bg=COLORS["panel"], highlightthickness=1, highlightbackground=COLORS["border"])
+        stats_card.pack(fill="x", padx=16, pady=(0, 12))
+        tk.Label(stats_card, text="SEARCH STATE", bg=COLORS["panel"], fg=COLORS["muted"], font=("Segoe UI Semibold", 9), anchor="w").pack(fill="x", padx=14, pady=(12, 8))
+        stats_grid = tk.Frame(stats_card, bg=COLORS["panel"])
+        stats_grid.pack(fill="x", padx=14, pady=(0, 14))
+        stat_items = [
+            ("Mode", self.backend_mode_state_var, COLORS["accent_coral"]),
+            ("Turn", self.backend_turn_state_var, COLORS["accent_cyan"]),
+            ("Alpha", self.backend_alpha_var, COLORS["accent_green"]),
+            ("Beta", self.backend_beta_var, COLORS["accent_gold"]),
+            ("Nodes", self.backend_nodes_var, COLORS["accent_white"]),
+            ("Prunes", self.backend_prunes_var, COLORS["accent_white"]),
+            ("Best", self.backend_best_var, COLORS["accent_white"]),
+            ("Choice", self.backend_choice_var, COLORS["accent_white"]),
+        ]
+        for index, (label_text, var, accent) in enumerate(stat_items):
+            cell = tk.Frame(stats_grid, bg=COLORS["card"], highlightthickness=1, highlightbackground=COLORS["border"])
+            cell.grid(row=index // 2, column=index % 2, sticky="nsew", padx=(0, 8) if index % 2 == 0 else (8, 0), pady=6)
+            tk.Label(cell, text=label_text.upper(), bg=COLORS["card"], fg=COLORS["muted"], font=("Segoe UI Semibold", 8), anchor="w").pack(fill="x", padx=12, pady=(10, 2))
+            tk.Label(cell, textvariable=var, bg=COLORS["card"], fg=accent, font=("Segoe UI Semibold", 12, "bold"), anchor="w").pack(fill="x", padx=12, pady=(0, 10))
+        stats_grid.grid_columnconfigure(0, weight=1)
+        stats_grid.grid_columnconfigure(1, weight=1)
+
+        candidate_card = tk.Frame(win, bg=COLORS["panel"], highlightthickness=1, highlightbackground=COLORS["border"])
+        candidate_card.pack(fill="x", padx=16, pady=(0, 12))
+        tk.Label(candidate_card, text="CANDIDATE WEIGHTS", bg=COLORS["panel"], fg=COLORS["muted"], font=("Segoe UI Semibold", 9), anchor="w").pack(fill="x", padx=14, pady=(12, 8))
+        tk.Label(candidate_card, textvariable=self.backend_eval_var, bg=COLORS["panel"], fg=COLORS["text"], font=("Segoe UI Semibold", 11), anchor="w", justify="left").pack(fill="x", padx=14, pady=(0, 10))
+        candidate_grid = tk.Frame(candidate_card, bg=COLORS["panel"])
+        candidate_grid.pack(padx=14, pady=(0, 14))
+        for r in range(3):
+            for c in range(3):
+                cell = tk.Label(candidate_grid, text="", width=10, height=4, bg=COLORS["card"], fg=COLORS["text"], font=("Consolas", 11, "bold"), relief="flat", bd=0, highlightthickness=1, highlightbackground=COLORS["border"], justify="center")
+                cell.grid(row=r, column=c, padx=4, pady=4, sticky="nsew")
+                candidate_grid.grid_columnconfigure(c, weight=1)
+                candidate_grid.grid_rowconfigure(r, weight=1)
+                self.backend_candidate_cells.append(cell)
+
+        move_card = tk.Frame(win, bg=COLORS["panel"], highlightthickness=1, highlightbackground=COLORS["border"])
+        move_card.pack(fill="both", expand=True, padx=16, pady=(0, 12))
+        tk.Label(move_card, text="TRACE LOG", bg=COLORS["panel"], fg=COLORS["muted"], font=("Segoe UI Semibold", 9), anchor="w").pack(fill="x", padx=14, pady=(12, 8))
+        tk.Label(move_card, textvariable=self.backend_move_var, bg=COLORS["panel"], fg=COLORS["text"], font=("Segoe UI Semibold", 11, "bold"), wraplength=500, justify="left", padx=14).pack(anchor="w")
+        tk.Label(move_card, textvariable=self.backend_board_var, bg=COLORS["panel"], fg=COLORS["accent_cyan"], font=("Consolas", 9), anchor="w", justify="left", padx=14).pack(anchor="w", pady=(8, 0))
+        self.backend_log_text = tk.Text(move_card, height=8, bg=COLORS["panel"], fg=COLORS["muted"], insertbackground=COLORS["muted"], relief="flat", bd=0, highlightthickness=0, wrap="word", font=("Consolas", 9))
+        self.backend_log_text.pack(fill="both", expand=True, padx=14, pady=(10, 14))
+        self.backend_log_text.configure(state="disabled")
+
+        footer = tk.Frame(win, bg=COLORS["bg"])
+        footer.pack(fill="x", padx=16, pady=(0, 16))
+        tk.Label(footer, text="This window exposes the backend as a live, visual debugger.", bg=COLORS["bg"], fg=COLORS["muted"], font=("Segoe UI", 9)).pack(anchor="w")
+
+        self._append_backend_log("Backend monitor opened.")
+        self.refresh_backend_window()
+
+    def close_backend_window(self) -> None:
+        self._clear_backend_trace()
+        if self.backend_window is not None:
+            try:
+                self.backend_window.destroy()
+            finally:
+                self.backend_window = None
+                self.backend_cells = []
+                self.backend_candidate_cells = []
+                self.backend_pipeline_labels = []
+
+    def _on_restart_key(self, event: Optional[tk.Event] = None) -> str:
+        del event
+        self._restart_shortcut_deadline = time.monotonic() + RESTART_SHORTCUT_WINDOW_SEC
+        self.new_game()
+        return "break"
+
+    def _on_restart_button_key(self, event: Optional[tk.Event] = None) -> str:
+        del event
+        self._restart_shortcut_deadline = 0.0
+        self.trigger_new_game()
+        return "break"
+
+    def _on_space_key(self, event: Optional[tk.Event] = None) -> str:
+        del event
+        now = time.monotonic()
+        if now <= self._restart_shortcut_deadline:
+            self._restart_shortcut_deadline = 0.0
+            self.toggle_cpu_vs_cpu_mode()
+        else:
+            self.toggle_ai_mode()
+        return "break"
+
+    def trigger_new_game(self, event: Optional[tk.Event] = None) -> None:
+        del event
+        self._restart_shortcut_deadline = 0.0
+        self.new_game()
+
+    def _clear_backend_trace(self) -> None:
+        if self.backend_trace_job is not None:
+            self.root.after_cancel(self.backend_trace_job)
+            self.backend_trace_job = None
+        self.backend_trace_data = None
+        self.backend_trace_steps = []
+        self.backend_trace_index = -1
+        self.backend_trace_pending_move = None
+
+    def _update_backend_pipeline(self, active_index: int, done_index: Optional[int] = None) -> None:
+        labels = self.backend_pipeline_labels
+        if not labels:
+            return
+        active_color = COLORS["accent_cyan"]
+        done_color = COLORS["accent_green"]
+        idle_color = COLORS["muted"]
+        for index, label in enumerate(labels):
+            if done_index is not None and index <= done_index:
+                label.configure(fg=done_color)
+            elif index == active_index:
+                label.configure(fg=active_color)
+            else:
+                label.configure(fg=idle_color)
+
+    def _format_board_state(self, board: Sequence[str]) -> str:
+        rows = []
+        for row in range(3):
+            cells = []
+            for col in range(3):
+                index = row * 3 + col
+                value = board[index] if board[index] else str(index + 1)
+                cells.append(f"{index + 1}:{value}")
+            rows.append("  ".join(cells))
+        return " | ".join(rows)
+
+    def _format_board_vector(self, board: Sequence[str]) -> str:
+        return "[" + ", ".join(repr(cell) if cell else '""' for cell in board) + "]"
+
+    def _set_backend_trace(self, trace: dict[str, object], chosen_move: int) -> None:
+        self.backend_trace_data = trace
+        self.backend_trace_pending_move = chosen_move
+        self.backend_trace_steps = list(trace.get("steps", []))
+        self.backend_trace_index = -1
+        self.backend_mode_state_var.set(str(trace.get("mode", self.backend_mode_state_var.get())))
+        self.backend_turn_state_var.set(str(trace.get("turn", self.current_player)))
+        if "board" in trace:
+            self.backend_board_state_var.set(self._format_board_state(trace["board"]))
+            self.backend_board_var.set(self._format_board_vector(trace["board"]))
+        self.backend_alpha_var.set("alpha = -1000")
+        self.backend_beta_var.set("beta = 1000")
+        self.backend_nodes_var.set("nodes = 0")
+        self.backend_prunes_var.set("prunes = 0")
+        self.backend_best_var.set("best = pending")
+        self.backend_choice_var.set("choice = pending")
+        self.backend_eval_var.set("evaluating: search tree")
+        self.backend_progress_var.set(f"0 / {len(self.backend_trace_steps)}")
+        self.backend_trace_job = self.root.after(180, self._advance_backend_trace)
+
+    def _advance_backend_trace(self) -> None:
+        if self.backend_trace_data is None:
+            self.backend_trace_job = None
+            return
+
+        self.backend_trace_index += 1
+        steps = self.backend_trace_steps
+        if self.backend_trace_index >= len(steps):
+            self.backend_trace_job = None
+            chosen = self.backend_trace_pending_move
+            if chosen is not None:
+                self.backend_phase_var.set("Apply move")
+                self.backend_status_var.set(f"Committing move {chosen + 1}")
+                self.backend_detail_var.set("The selected branch is now applied to the live board.")
+                self.backend_move_var.set(f"Selected move {chosen + 1} has been committed.")
+                self.backend_choice_var.set(f"choice = {chosen + 1}")
+                self.backend_progress_var.set(f"{len(steps)} / {len(steps)}")
+                self._update_backend_pipeline(5, 5)
+                self.refresh_backend_window()
+                self.backend_trace_data = None
+                self.backend_trace_steps = []
+                self.backend_trace_index = -1
+                self.backend_trace_pending_move = None
+                self.make_move(chosen, by_ai=True)
+                self._start_bot_move_animation(chosen)
+            return
+
+        step = steps[self.backend_trace_index]
+        stage = str(step.get("stage", "scan"))
+        stage_index_map = {
+            "capture": 0,
+            "predict": 1,
+            "score": 2,
+            "prune": 3,
+            "choose": 4,
+            "commit": 5,
+        }
+        stage_index = stage_index_map.get(stage, 1)
+        self._update_backend_pipeline(stage_index, stage_index - 1 if stage_index > 0 else None)
+
+        self.backend_phase_var.set(str(step.get("phase", "Search")))
+        self.backend_status_var.set(str(step.get("status", "Running search...")))
+        self.backend_detail_var.set(str(step.get("detail", "")))
+        self.backend_move_var.set(str(step.get("move_text", self.backend_move_var.get())))
+        self.backend_progress_var.set(f"{self.backend_trace_index + 1} / {len(steps)}")
+
+        if "alpha" in step:
+            self.backend_alpha_var.set(f"alpha = {step['alpha']}")
+        if "beta" in step:
+            self.backend_beta_var.set(f"beta = {step['beta']}")
+        if "nodes" in step:
+            self.backend_nodes_var.set(f"nodes = {step['nodes']}")
+        if "prunes" in step:
+            self.backend_prunes_var.set(f"prunes = {step['prunes']}")
+        if "best" in step:
+            self.backend_best_var.set(f"best = {step['best']}")
+        if "choice" in step:
+            self.backend_choice_var.set(f"choice = {step['choice']}")
+        if "eval" in step:
+            self.backend_eval_var.set(str(step["eval"]))
+        if "board" in step:
+            self.backend_board_state_var.set(self._format_board_state(step["board"]))
+            self.backend_board_var.set(self._format_board_vector(step["board"]))
+        if "candidates" in step:
+            self._render_backend_candidates(step["candidates"], step.get("focus"))
+        if "trace_line" in step:
+            self._append_backend_log(str(step["trace_line"]))
+
+        self.refresh_backend_window()
+        self.backend_trace_job = self.root.after(220, self._advance_backend_trace)
+
+    def _render_backend_candidates(self, candidates: Sequence[dict[str, object]], focus: Optional[int] = None) -> None:
+        candidate_map = {int(item["move"]): item for item in candidates}
+        for index, cell in enumerate(self.backend_candidate_cells):
+            item = candidate_map.get(index)
+            symbol = self.board[index]
+            if symbol:
+                text = f"{index + 1}\nLOCKED\n{symbol}"
+                fg = COLORS["muted"]
+                bg = COLORS["card"]
+            elif item is not None:
+                score = item.get("score", "?")
+                nodes = item.get("nodes", 0)
+                prunes = item.get("prunes", 0)
+                if isinstance(score, (int, float)):
+                    score_text = f"{score:+d}"
+                    fg = COLORS["accent_green"] if score > 0 else COLORS["accent_coral"] if score < 0 else COLORS["accent_cyan"]
+                else:
+                    score_text = str(score)
+                    fg = COLORS["accent_cyan"]
+                text = f"{index + 1}\nscore {score_text}\nN{nodes} P{prunes}"
+                bg = COLORS["tile_hover"] if focus == index else COLORS["card"]
+            else:
+                text = f"{index + 1}\nwaiting\n-"
+                fg = COLORS["muted"]
+                bg = COLORS["card"]
+
+            cell.configure(
+                text=text,
+                bg=bg,
+                fg=fg,
+                highlightbackground=COLORS["accent_gold"] if focus == index else COLORS["border"],
+            )
+
+    def _append_backend_log(self, text: str) -> None:
+        self.backend_log_lines.append(text)
+        self.backend_log_lines = self.backend_log_lines[-8:]
+        if hasattr(self, "backend_log_text") and self.backend_log_text.winfo_exists():
+            self.backend_log_text.configure(state="normal")
+            self.backend_log_text.delete("1.0", tk.END)
+            self.backend_log_text.insert("end", "\n".join(self.backend_log_lines))
+            self.backend_log_text.configure(state="disabled")
+
+    def refresh_backend_window(self) -> None:
+        if self.backend_window is None or not self.backend_window.winfo_exists():
+            return
+
+        trace_active = self.backend_trace_data is not None and 0 <= self.backend_trace_index < len(self.backend_trace_steps)
+        if not trace_active:
+            if self.game_over:
+                phase = "Round complete"
+                status = "Search halted"
+                detail = "The round finished, so the backend is holding the final state."
+                move = "Waiting for a new round."
+            elif self.cpu_vs_cpu:
+                phase = "Auto simulation"
+                status = f"Computer vs Computer ({self.current_player} to move)"
+                detail = "Both sides are controlled by the backend. Alpha-beta keeps selecting the next move."
+                move = self.backend_move_var.get() if self.backend_move_var.get() != "No move selected yet." else "Evaluating the next automated move..."
+            elif self.ai_symbol is None:
+                phase = "Manual play"
+                status = "Human vs Human"
+                detail = "Backend is idle because the computer is turned off."
+                move = "No AI move is being evaluated."
+            elif self.current_player == self.ai_symbol:
+                phase = "Alpha-beta search"
+                status = f"Computer thinking as {self.ai_symbol}"
+                detail = "Scanning available moves, scoring each branch, and pruning weak paths."
+                move = self.backend_move_var.get() if self.backend_move_var.get() != "No move selected yet." else "Evaluating candidate moves..."
+            else:
+                phase = "Board sync"
+                status = f"Waiting for player {self.current_player}"
+                detail = "The AI is idle until the turn switches back to the computer."
+                move = "Player turn in progress."
+
+            self.backend_phase_var.set(phase)
+            self.backend_status_var.set(status)
+            self.backend_detail_var.set(detail)
+            self.backend_move_var.set(move)
+            self.backend_mode_state_var.set("Computer vs Computer" if self.cpu_vs_cpu else "Human vs Computer" if self.ai_symbol is not None else "Human vs Human")
+            self.backend_turn_state_var.set(self.current_player)
+            self.backend_board_state_var.set(self._format_board_state(self.board))
+            self.backend_board_var.set(self._format_board_vector(self.board))
+            self.backend_progress_var.set("idle")
+            self.backend_alpha_var.set("alpha = -")
+            self.backend_beta_var.set("beta = -")
+            self.backend_nodes_var.set("nodes = 0")
+            self.backend_prunes_var.set("prunes = 0")
+            self.backend_best_var.set("best = -")
+            self.backend_choice_var.set("choice = pending")
+            self.backend_eval_var.set("evaluating: none")
+
+            self._update_backend_pipeline(0 if self.cpu_vs_cpu or self.ai_symbol is not None else 0)
+
+            for i, cell in enumerate(self.backend_cells):
+                symbol = self.board[i]
+                display = f"{i + 1}" if not symbol else f"{i + 1}\n{symbol}"
+                cell.configure(
+                    text=display,
+                    bg=COLORS["tile_win"] if i in self.winning_cells else COLORS["card"] if not symbol else COLORS["tile_hover"],
+                    fg=COLORS["accent_white"] if i in self.winning_cells else (COLORS["accent_coral"] if symbol == "X" else COLORS["accent_cyan"] if symbol == "O" else COLORS["muted"]),
+                    highlightbackground=COLORS["accent_green"] if i == self.last_move_index and symbol else COLORS["border"],
+                )
+
+            if self.backend_last_analysis:
+                entries = self.backend_last_analysis.get("entries", [])
+                chosen = self.backend_last_analysis.get("chosen")
+                best_score = self.backend_last_analysis.get("best_score")
+                lines = ["AI evaluation:"]
+                for move_index, move_score in entries:
+                    lines.append(f"  move {move_index + 1}: score {move_score}")
+                if chosen is not None:
+                    lines.append(f"Selected move: {chosen + 1} (score {best_score})")
+                self._append_backend_log("\n".join(lines))
+                self.backend_last_analysis = None
+        else:
+            step = self.backend_trace_steps[self.backend_trace_index]
+            if "board" in step:
+                self.backend_board_state_var.set(self._format_board_state(step["board"]))
+                self.backend_board_var.set(self._format_board_vector(step["board"]))
+            if "candidates" in step:
+                self._render_backend_candidates(step["candidates"], step.get("focus"))
+            self._update_backend_pipeline(
+                {"capture": 0, "predict": 1, "score": 2, "prune": 3, "choose": 4, "commit": 5}.get(str(step.get("stage", "predict")), 1),
+                None,
+            )
+
+        for i, cell in enumerate(self.backend_cells):
+            symbol = self.board[i]
+            display = f"{i + 1}" if not symbol else f"{i + 1}\n{symbol}"
+            cell.configure(
+                text=display,
+                bg=COLORS["tile_win"] if i in self.winning_cells else COLORS["card"] if not symbol else COLORS["tile_hover"],
+                fg=COLORS["accent_white"] if i in self.winning_cells else (COLORS["accent_coral"] if symbol == "X" else COLORS["accent_cyan"] if symbol == "O" else COLORS["muted"]),
+                highlightbackground=COLORS["accent_green"] if i == self.last_move_index and symbol else COLORS["border"],
+            )
+
+        self.backend_window.update_idletasks()
+
     def set_theme(self, theme_name: str) -> None:
         if theme_name not in THEMES or theme_name == self.theme_name:
             return
+
+        backend_open = self.backend_window is not None and self.backend_window.winfo_exists()
+        if backend_open:
+            self.close_backend_window()
 
         self._cancel_timers()
         self.theme_name = theme_name
@@ -664,6 +1129,8 @@ class TicTacToeApp:
         COLORS.update(THEMES[theme_name])
         self.root.configure(bg=COLORS["bg"])
         self._rebuild_ui()
+        if backend_open:
+            self.open_backend_window()
 
     def _cancel_timers(self) -> None:
         if self.pending_ai_job is not None:
@@ -684,15 +1151,17 @@ class TicTacToeApp:
         self.maximize_window()
         self._refresh_labels()
         self.render()
-        if self.ai_symbol == self.current_player and not self.game_over:
+        if self._auto_play_enabled():
             self._schedule_ai_move()
 
     def new_game(self, event: Optional[tk.Event] = None) -> None:
         del event
         self._cancel_timers()
+        self._clear_backend_trace()
         self.bot_move_anim_step = 0
         self.bot_move_anim_index = None
         self.bot_move_anim_total = 0
+        self.backend_last_analysis = None
 
         self.board = [""] * 9
         self.current_player = "X"
@@ -700,15 +1169,26 @@ class TicTacToeApp:
         self.last_move_index = None
         self.hover_index = None
         self.winning_cells = []
+        self._append_backend_log("New game started.")
         self._refresh_labels()
         self.render()
 
-        if self.ai_symbol == self.current_player and not self.game_over:
+        if self._auto_play_enabled():
             self._schedule_ai_move()
 
     def toggle_ai_mode(self, event: Optional[tk.Event] = None) -> None:
         del event
-        if self.game_over:
+        self._clear_backend_trace()
+        self._cancel_timers()
+        self.bot_move_anim_step = 0
+        self.bot_move_anim_index = None
+        self.bot_move_anim_total = 0
+        log_message: Optional[str] = None
+        if self.cpu_vs_cpu:
+            self.cpu_vs_cpu = False
+            self.ai_symbol = None
+            log_message = "Computer vs computer disabled."
+        elif self.game_over:
             # Keep the mode toggle available, but do not force a move into a finished game.
             self.ai_symbol = self.current_player if self.ai_symbol is None else None
         elif self.ai_symbol is None:
@@ -716,32 +1196,77 @@ class TicTacToeApp:
         else:
             self.ai_symbol = None
 
-        if self.pending_ai_job is not None:
-            self.root.after_cancel(self.pending_ai_job)
-            self.pending_ai_job = None
-        if self.turn_banner_job is not None:
-            self.root.after_cancel(self.turn_banner_job)
-            self.turn_banner_job = None
+        self._refresh_labels()
+        self.render()
+        if log_message is not None:
+            self._append_backend_log(log_message)
+        elif not self.cpu_vs_cpu:
+            self._append_backend_log(f"Computer toggled {'on' if self.ai_symbol else 'off'}.")
 
+        if self._auto_play_enabled():
+            self._schedule_ai_move()
+
+    def toggle_cpu_vs_cpu_mode(self, event: Optional[tk.Event] = None) -> None:
+        del event
+        self._clear_backend_trace()
+        self._cancel_timers()
+        self.bot_move_anim_step = 0
+        self.bot_move_anim_index = None
+        self.bot_move_anim_total = 0
+        self.cpu_vs_cpu = not self.cpu_vs_cpu
+        if self.cpu_vs_cpu:
+            self.ai_symbol = None
+            self._append_backend_log("Computer vs computer enabled.")
+        else:
+            self.ai_symbol = None
+            self._append_backend_log("Computer vs computer disabled.")
+
+        self._cancel_timers()
         self._refresh_labels()
         self.render()
 
-        if self.ai_symbol == self.current_player and not self.game_over:
+        if self._auto_play_enabled():
             self._schedule_ai_move()
 
-    def _refresh_labels(self) -> None:
+    def _auto_play_enabled(self) -> bool:
+        return not self.game_over and (self.cpu_vs_cpu or (self.ai_symbol is not None and self.current_player == self.ai_symbol))
+
+    def _active_computer_symbol(self) -> Optional[str]:
+        if self.cpu_vs_cpu:
+            return self.current_player
+        return self.ai_symbol
+
+    def _game_mode_text(self) -> tuple[str, str, str]:
+        if self.cpu_vs_cpu:
+            return (
+                "Computer vs Computer",
+                "Both sides are controlled by the backend. Press Space to stop.",
+                "Auto Play: On",
+            )
         if self.ai_symbol is None:
-            mode_text = "Human vs Human"
-            control_text = "Computer control is off. Two people can take turns locally."
-            button_text = "Computer: Off"
-        else:
-            mode_text = "Human vs Computer"
-            control_text = f"Computer is controlling {self.ai_symbol} and will move on that side."
-            button_text = f"Computer: {self.ai_symbol}"
+            return (
+                "Human vs Human",
+                "Computer control is off. Two people can take turns locally.",
+                "Computer: Off",
+            )
+        return (
+            "Human vs Computer",
+            f"Computer is controlling {self.ai_symbol} and will move on that side.",
+            f"Computer: {self.ai_symbol}",
+        )
+
+    def _refresh_labels(self) -> None:
+        mode_text, control_text, button_text = self._game_mode_text()
 
         self.mode_var.set(mode_text)
         self.control_var.set(control_text)
         self.ai_button.configure(text=button_text)
+        if hasattr(self, "cpu_button"):
+            cpu_button_text = "Computer vs Computer: On" if self.cpu_vs_cpu else "Computer vs Computer: Off"
+            self.cpu_button.configure(text=cpu_button_text)
+        if hasattr(self, "backend_button"):
+            backend_button_text = "Backend: On" if self.backend_window is not None and self.backend_window.winfo_exists() else "Backend: Off"
+            self.backend_button.configure(text=backend_button_text)
 
         self.score_x_var.set(str(self.scores["X"]))
         self.score_o_var.set(str(self.scores["O"]))
@@ -760,14 +1285,18 @@ class TicTacToeApp:
                 self._set_turn_banner("DRAW GAME", COLORS["accent_gold"], animated=False)
         else:
             self.status_var.set(self._turn_status_text())
-            if self.ai_symbol is not None and self.current_player == self.ai_symbol:
+            if self._auto_play_enabled():
                 self._set_turn_banner(f"Computer to move ({self.current_player})", COLORS["accent_cyan"], animated=False)
             else:
                 accent = COLORS["accent_coral"] if self.current_player == "X" else COLORS["accent_cyan"]
                 self._set_turn_banner(self._turn_status_text(), accent, animated=False)
 
     def _refresh_player_states(self) -> None:
-        if self.ai_symbol is None:
+        if self.cpu_vs_cpu:
+            self.player1_state_var.set("Computer turn" if self.current_player == "X" else "Waiting")
+            self.player2_state_var.set("Computer turn" if self.current_player == "O" else "Waiting")
+            self.bot_state_var.set("Auto play enabled")
+        elif self.ai_symbol is None:
             self.player1_state_var.set("Active" if self.current_player == "X" else "Waiting")
             self.player2_state_var.set("Active" if self.current_player == "O" else "Waiting")
             self.bot_state_var.set("Off")
@@ -790,6 +1319,8 @@ class TicTacToeApp:
         self.turn_banner_label.configure(bg=COLORS["panel"], fg=accent)
 
     def _turn_status_text(self) -> str:
+        if self.cpu_vs_cpu:
+            return f"Computer vs Computer ({self.current_player} turn)"
         if self.ai_symbol is None:
             return "Player 1 turn" if self.current_player == "X" else "Player 2 turn"
         if self.current_player == self.ai_symbol:
@@ -799,6 +1330,7 @@ class TicTacToeApp:
     def render(self) -> None:
         self._draw_board()
         self._refresh_labels()
+        self.refresh_backend_window()
 
     def _draw_board(self) -> None:
         canvas = self.board_canvas
@@ -1189,7 +1721,7 @@ class TicTacToeApp:
     def make_move(self, index: int, by_ai: bool = False) -> bool:
         if self.game_over or self.board[index]:
             return False
-        if self.ai_symbol == self.current_player and not by_ai:
+        if self._auto_play_enabled() and not by_ai:
             return False
 
         self.board[index] = self.current_player
@@ -1216,7 +1748,7 @@ class TicTacToeApp:
         self._refresh_labels()
         self.render()
 
-        if self.ai_symbol == self.current_player:
+        if self._auto_play_enabled():
             self._schedule_ai_move()
 
         return True
@@ -1238,17 +1770,27 @@ class TicTacToeApp:
     def _schedule_ai_move(self) -> None:
         if self.pending_ai_job is not None:
             self.root.after_cancel(self.pending_ai_job)
+        if self.game_over or not self._auto_play_enabled():
+            self.pending_ai_job = None
+            return
         self.pending_ai_job = self.root.after(BOT_THINK_DELAY_MS, self._ai_move)
 
     def _ai_move(self) -> None:
         self.pending_ai_job = None
-        if self.game_over or self.ai_symbol != self.current_player:
+        if self.game_over or self._active_computer_symbol() != self.current_player:
             return
 
         move = self.best_ai_move()
         if move is not None:
-            self.make_move(move, by_ai=True)
-            self._start_bot_move_animation(move)
+            trace = None
+            if self.backend_last_analysis:
+                trace = self.backend_last_analysis.get("trace")
+                self.backend_last_analysis = None
+            if trace and self.backend_window is not None and self.backend_window.winfo_exists():
+                self._set_backend_trace(trace, move)
+            else:
+                self.make_move(move, by_ai=True)
+                self._start_bot_move_animation(move)
 
     def _start_bot_move_animation(self, index: int) -> None:
         if self.bot_move_job is not None:
@@ -1275,10 +1817,10 @@ class TicTacToeApp:
         self.bot_move_job = self.root.after(BOT_MOVE_ANIM_MS, self._animate_bot_move)
 
     def best_ai_move(self) -> Optional[int]:
-        if self.ai_symbol is None:
+        ai = self._active_computer_symbol()
+        if ai is None:
             return None
 
-        ai = self.ai_symbol
         human = other_symbol(ai)
         board = tuple(self.board)
         available = [index for index, cell in enumerate(board) if not cell]
@@ -1290,7 +1832,10 @@ class TicTacToeApp:
         def ordered_moves(state: Sequence[str]) -> list[int]:
             return [idx for idx in preferred_order if not state[idx]]
 
+        search_stats = {"nodes": 0, "prunes": 0}
+
         def score(state: tuple[str, ...], turn: str, alpha: int, beta: int, depth: int) -> int:
+            search_stats["nodes"] += 1
             winner = self._winner_symbol(state)
             if winner == ai:
                 return 100 - depth
@@ -1308,6 +1853,7 @@ class TicTacToeApp:
                     best = max(best, score(tuple(next_state), human, alpha, beta, depth + 1))
                     alpha = max(alpha, best)
                     if beta <= alpha:
+                        search_stats["prunes"] += 1
                         break
                 return best
 
@@ -1318,15 +1864,90 @@ class TicTacToeApp:
                 best = min(best, score(tuple(next_state), ai, alpha, beta, depth + 1))
                 beta = min(beta, best)
                 if beta <= alpha:
+                    search_stats["prunes"] += 1
                     break
             return best
 
         best_score = -1000
         best_moves: list[int] = []
+        evaluated_moves: list[tuple[int, int]] = []
+        trace_steps: list[dict[str, object]] = [
+            {
+                "stage": "capture",
+                "phase": "Capture board",
+                "status": "Board stored in search buffer",
+                "detail": "The backend copies the visible board into a plain array before any prediction starts.",
+                "board": list(board),
+                "move_text": "Board copied into memory.",
+                "alpha": "-1000",
+                "beta": "1000",
+                "nodes": 0,
+                "prunes": 0,
+                "best": "-",
+                "choice": "pending",
+                "eval": "State vector prepared.",
+            },
+            {
+                "stage": "predict",
+                "phase": "Predict candidates",
+                "status": "Enumerating open squares",
+                "detail": f"Open squares: {', '.join(str(index + 1) for index in available)}",
+                "board": list(board),
+                "move_text": "Possible moves are being prepared.",
+                "alpha": "-1000",
+                "beta": "1000",
+                "nodes": 0,
+                "prunes": 0,
+                "best": "-",
+                "choice": "pending",
+                "eval": f"{len(available)} legal moves found.",
+                "candidates": [
+                    {"move": index, "score": "-", "nodes": 0, "prunes": 0}
+                    for index in available
+                ],
+                "focus": None,
+            },
+        ]
+        current_candidates: list[dict[str, object]] = [
+            {"move": index, "score": "-", "nodes": 0, "prunes": 0}
+            for index in available
+        ]
+
         for move in ordered_moves(board):
             next_state = list(board)
             next_state[move] = ai
+            before_nodes = search_stats["nodes"]
+            before_prunes = search_stats["prunes"]
             move_score = score(tuple(next_state), human, -1000, 1000, 1)
+            nodes_delta = search_stats["nodes"] - before_nodes
+            prunes_delta = search_stats["prunes"] - before_prunes
+            evaluated_moves.append((move, move_score))
+            for candidate in current_candidates:
+                if int(candidate["move"]) == move:
+                    candidate["score"] = move_score
+                    candidate["nodes"] = nodes_delta
+                    candidate["prunes"] = prunes_delta
+                    break
+            current_best = best_score
+            trace_steps.append(
+                {
+                    "stage": "score",
+                    "phase": "Score branches",
+                    "status": f"Evaluating square {move + 1}",
+                    "detail": f"Candidate {move + 1} returns score {move_score} after {nodes_delta} nodes and {prunes_delta} prunes.",
+                    "board": list(board),
+                    "move_text": f"Square {move + 1} scored {move_score}.",
+                    "alpha": str(current_best),
+                    "beta": "1000",
+                    "nodes": search_stats["nodes"],
+                    "prunes": search_stats["prunes"],
+                    "best": current_best if current_best != -1000 else move_score,
+                    "choice": "pending",
+                    "eval": f"Move {move + 1} -> score {move_score}",
+                    "candidates": [dict(item) for item in current_candidates],
+                    "focus": move,
+                }
+            )
             if move_score > best_score:
                 best_score = move_score
                 best_moves = [move]
@@ -1336,11 +1957,73 @@ class TicTacToeApp:
         if not best_moves:
             return None
 
-        return random.choice(best_moves)
+        chosen = random.choice(best_moves)
+        trace_steps.append(
+            {
+                "stage": "choose",
+                "phase": "Choose move",
+                "status": f"Selected square {chosen + 1}",
+                "detail": f"The best score is {best_score}, so the backend chooses square {chosen + 1}.",
+                "board": list(board),
+                "move_text": f"Chosen move: {chosen + 1}.",
+                "alpha": str(best_score),
+                "beta": "1000",
+                "nodes": search_stats["nodes"],
+                "prunes": search_stats["prunes"],
+                "best": best_score,
+                "choice": chosen + 1,
+                "eval": f"Final choice: {chosen + 1}",
+                "candidates": [dict(item) for item in current_candidates],
+                "focus": chosen,
+            }
+        )
+        trace_steps.append(
+            {
+                "stage": "commit",
+                "phase": "Apply move",
+                "status": f"Applying move {chosen + 1}",
+                "detail": "The selected move leaves search and becomes the live board move.",
+                "board": list(board),
+                "move_text": f"Applying chosen move {chosen + 1}.",
+                "alpha": str(best_score),
+                "beta": "1000",
+                "nodes": search_stats["nodes"],
+                "prunes": search_stats["prunes"],
+                "best": best_score,
+                "choice": chosen + 1,
+                "eval": "Committing the selected branch.",
+                "candidates": [dict(item) for item in current_candidates],
+                "focus": chosen,
+            }
+        )
+        self.backend_last_analysis = {
+            "entries": evaluated_moves,
+            "chosen": chosen,
+            "best_score": best_score,
+            "trace": {
+                "board": list(board),
+                "mode": "Computer vs Computer" if self.cpu_vs_cpu else "Human vs Computer",
+                "turn": ai,
+                "human": human,
+                "available": available,
+                "nodes": search_stats["nodes"],
+                "prunes": search_stats["prunes"],
+                "entries": evaluated_moves,
+                "chosen": chosen,
+                "best_score": best_score,
+                "steps": trace_steps,
+            },
+        }
+        self._append_backend_log(
+            f"Alpha-beta selected move {chosen + 1} with score {best_score}. "
+            f"Visited {search_stats['nodes']} nodes and pruned {search_stats['prunes']} branches."
+        )
+        return chosen
 
     def on_close(self, event: Optional[tk.Event] = None) -> None:
         del event
         self._cancel_timers()
+        self.close_backend_window()
         self.root.destroy()
 
 

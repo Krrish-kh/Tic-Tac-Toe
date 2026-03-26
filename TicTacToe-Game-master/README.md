@@ -1,6 +1,6 @@
 # TicTacToe Game
 
-A polished desktop Tic Tac Toe game built in Python with a custom Tkinter frontend and an unbeatable minimax AI.
+A polished Tic Tac Toe game with both a desktop Python version and a standalone browser version.
 
 ## Features
 
@@ -10,6 +10,7 @@ A polished desktop Tic Tac Toe game built in Python with a custom Tkinter fronte
 - Unbeatable computer opponent
 - Scoreboard for X, O, and draws
 - Keyboard shortcuts for fast play
+- Standalone `index.html` browser version with themed UI
 
 ## Controls
 
@@ -18,7 +19,7 @@ A polished desktop Tic Tac Toe game built in Python with a custom Tkinter fronte
 - `Space` = toggle AI control
 - `Esc` = exit
 
-## Run
+## Run Desktop
 
 You only need Python with Tkinter available.
 
@@ -26,9 +27,13 @@ You only need Python with Tkinter available.
 python Game.py
 ```
 
+## Run Browser
+
+Open [`index.html`](index.html) directly in a browser, or serve the folder with any static web server.
+
 ## Notes
 
-- The game logic is still based on the original project, but the frontend has been redesigned into a higher-quality desktop app.
+- The game logic is still based on the original project, but the frontend has been redesigned into a higher-quality desktop app and a browser version.
 - If you want to package it into an executable again, rebuild it from this updated source.
 
 ## License
