@@ -1,0 +1,163 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Tic Tac Toe</title>
+  <style>
+    :root{--bg:#0d1117;--panel:#141a22;--card:#1a222d;--tile:#171f28;--tile-hover:#1d2732;--tile-win:#142a31;--border:#2a3441;--text:#eef2f6;--muted:#93a0b1;--accent-cyan:#82c9d6;--accent-green:#7ac3a3;--accent-coral:#c09a82;--accent-gold:#b6ab7a;--accent-white:#fbfcfd}
+    *{box-sizing:border-box} html,body{height:100%} body{margin:0;font-family:Segoe UI,system-ui,sans-serif;background:linear-gradient(180deg,#0b0f14 0%,var(--bg) 100%);color:var(--text);overflow:hidden}
+    .app{display:grid;grid-template-columns:minmax(0,1fr) 286px;gap:18px;height:100%;padding:22px}
+    .main{min-width:0;display:flex;flex-direction:column;gap:14px}
+    .header{display:flex;align-items:center;justify-content:space-between;gap:16px}
+    .brand{display:flex;align-items:center;gap:16px;min-width:0}
+    .badge{width:82px;height:82px;border-radius:16px;background:var(--panel);border:1px solid var(--border);display:grid;place-items:center;overflow:hidden;position:relative}
+    .badge::before{content:"";position:absolute;inset:10px;border-radius:12px;background:linear-gradient(90deg,transparent 28%,var(--accent-cyan) 28% 34%,transparent 34% 66%,var(--accent-cyan) 66% 72%,transparent 72%),linear-gradient(180deg,transparent 28%,var(--accent-cyan) 28% 34%,transparent 34% 66%,var(--accent-cyan) 66% 72%,transparent 72%),var(--card);opacity:.8}
+    .badge svg{position:relative;z-index:1;width:54px;height:54px;opacity:.95}
+    h1{margin:0;font-size:clamp(2rem,4vw,3rem);line-height:1;letter-spacing:-.04em}
+    .subtitle{margin-top:8px;color:var(--muted);font-size:.98rem;max-width:62ch}
+    .top-pill,.turn-banner,.card,.board-shell,.theme-chip,.tile,.btn{border-radius:14px}
+    .top-pill,.turn-banner,.card,.board-shell{border:1px solid var(--border);background:var(--panel)}
+    .top-pill{color:var(--accent-cyan);padding:12px 16px;font-weight:700;white-space:nowrap}
+    .section-label{margin:0 0 6px;font-size:1.1rem;font-weight:700}
+    .section-sub{margin:0;color:var(--muted);font-size:.94rem}
+    .theme-row{display:flex;flex-wrap:wrap;gap:8px;margin-top:12px}
+    .theme-chip{appearance:none;border:1px solid var(--border);background:var(--card);color:var(--text);padding:9px 14px;font:inherit;cursor:pointer}
+    .theme-chip.active{border-color:var(--accent-gold)}
+    .turn-banner{padding:14px 18px;color:var(--accent-cyan);font-size:1.1rem;font-weight:700}
+    .board-shell{position:relative;flex:1;min-height:0;overflow:hidden;display:grid;place-items:center;padding:18px;box-shadow:0 16px 36px rgba(0,0,0,.26)}
+    .board-wrap{position:relative;width:min(100%,620px);aspect-ratio:1/1}
+    .board{display:grid;grid-template-columns:repeat(3,1fr);gap:12px;width:100%;height:100%;position:relative;z-index:1}
+    .tile{appearance:none;border:1px solid var(--border);background:var(--tile);display:grid;place-items:center;padding:0;overflow:hidden;position:relative;cursor:pointer}
+    .tile:hover:not(.locked){background:var(--tile-hover)}
+    .tile.locked{cursor:default}
+    .tile.win{background:var(--tile-win);border-color:var(--accent-green)}
+    .tile .piece{width:72%;height:72%;display:block;animation:pop .16s ease-out;pointer-events:none}
+    .tile.last::after{content:"";position:absolute;inset:8px;border-radius:10px;border:2px solid var(--accent-coral);pointer-events:none}
+    .win-line{position:absolute;inset:0;width:100%;height:100%;pointer-events:none;z-index:2}
+    .sidebar{min-width:0;display:flex;flex-direction:column;gap:14px}
+    .card{padding:16px}
+    .card h2{margin:0 0 12px;font-size:.92rem;letter-spacing:.04em;color:var(--muted);font-weight:700;text-transform:uppercase}
+    .status-main{font-size:1.15rem;font-weight:800;margin:0}
+    .status-detail{margin:10px 0 0;color:var(--muted);line-height:1.5}
+    .score-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:10px}
+    .score-chip{background:var(--card);border:1px solid var(--border);border-radius:14px;padding:12px;text-align:center}
+    .score-chip .label{display:block;font-size:.88rem;font-weight:700;margin-bottom:8px}
+    .score-chip .value{font-size:1.7rem;font-weight:900}
+    .players{display:grid;gap:10px}
+    .player-row{display:flex;align-items:center;gap:12px;border-radius:14px;border:1px solid var(--border);background:var(--card);padding:12px}
+    .player-dot{width:12px;height:12px;border-radius:999px;flex:0 0 auto}
+    .player-row strong{display:block;margin-bottom:3px}.player-row span{color:var(--muted);font-size:.9rem}
+    .button-list{display:grid;gap:10px}
+    .btn{appearance:none;border:0;padding:12px 14px;font:inherit;font-weight:700;cursor:pointer}
+    .btn.primary{background:var(--accent-green);color:#08100d}.btn.secondary{background:var(--accent-cyan);color:#091116}.btn.warn{background:var(--accent-coral);color:#140a06}
+    .shortcuts{color:var(--muted);line-height:1.65;white-space:pre-line;font-family:Consolas,"Cascadia Mono",monospace;font-size:.92rem}
+    .footer{color:var(--muted);font-size:.86rem;text-align:right;padding-top:2px}
+    @keyframes pop{from{transform:scale(.85);opacity:.35}to{transform:scale(1);opacity:1}}
+    @media (max-width:1180px){body{overflow:auto}.app{grid-template-columns:1fr;height:auto;min-height:100%}.sidebar{order:2}.board-shell{min-height:70vh}.footer{text-align:left}}
+    @media (max-width:720px){.app{padding:14px;gap:12px}.header{flex-direction:column;align-items:flex-start}.top-pill{align-self:stretch;text-align:center}.score-grid{grid-template-columns:1fr}.board-shell{padding:12px}}
+  </style>
+</head>
+<body>
+  <div class="app">
+    <main class="main">
+      <div class="header">
+        <div class="brand">
+          <div class="badge" aria-hidden="true">
+            <svg viewBox="0 0 100 100">
+              <rect x="13" y="13" width="74" height="74" rx="14" fill="none" stroke="var(--accent-cyan)" stroke-width="5" />
+              <line x1="26" y1="26" x2="26" y2="74" stroke="var(--accent-cyan)" stroke-width="6" stroke-linecap="round" />
+              <line x1="50" y1="26" x2="50" y2="74" stroke="var(--accent-cyan)" stroke-width="6" stroke-linecap="round" />
+              <line x1="74" y1="26" x2="74" y2="74" stroke="var(--accent-cyan)" stroke-width="6" stroke-linecap="round" />
+              <line x1="26" y1="26" x2="74" y2="26" stroke="var(--accent-cyan)" stroke-width="6" stroke-linecap="round" />
+              <line x1="26" y1="50" x2="74" y2="50" stroke="var(--accent-cyan)" stroke-width="6" stroke-linecap="round" />
+              <line x1="26" y1="74" x2="74" y2="74" stroke="var(--accent-cyan)" stroke-width="6" stroke-linecap="round" />
+              <circle cx="76" cy="78" r="10" fill="none" stroke="var(--accent-green)" stroke-width="5" />
+              <path d="M24 22 l12 12" stroke="var(--accent-coral)" stroke-width="5" stroke-linecap="round" />
+            </svg>
+          </div>
+          <div><h1>Tic Tac Toe</h1><div class="subtitle">Browser edition with polished themes, a clean board, and an alpha-beta computer.</div></div>
+        </div>
+        <div class="top-pill" id="modePill">Human vs Human</div>
+      </div>
+      <section>
+        <h3 class="section-label">Playfield</h3>
+        <p class="section-sub">Click a tile, press R for a new game, or Space to toggle the computer on or off.</p>
+        <div class="theme-row" id="themeRow"></div>
+      </section>
+      <div class="turn-banner" id="turnBanner">Player 1 turn (X)</div>
+      <section class="board-shell">
+        <div class="board-wrap" id="boardWrap">
+          <div class="board" id="board" aria-label="Tic Tac Toe board"></div>
+          <svg class="win-line" id="winLine" aria-hidden="true"></svg>
+        </div>
+      </section>
+    </main>
+    <aside class="sidebar">
+      <section class="card">
+        <h2>Match Status</h2><p class="status-main" id="statusMain">Player 1 turn (X)</p><p class="status-detail" id="statusDetail">Computer control is off. Two people can take turns locally.</p>
+      </section>
+      <section class="card">
+        <h2>Scoreboard</h2>
+        <div class="score-grid">
+          <div class="score-chip"><span class="label" style="color:var(--accent-coral)">X</span><span class="value" id="scoreX">0</span></div>
+          <div class="score-chip"><span class="label" style="color:var(--accent-cyan)">O</span><span class="value" id="scoreO">0</span></div>
+          <div class="score-chip"><span class="label" style="color:var(--accent-green)">Draw</span><span class="value" id="scoreDraw">0</span></div>
+        </div>
+      </section>
+      <section class="card">
+        <h2>Players</h2>
+        <div class="players">
+          <div class="player-row"><div class="player-dot" style="background:var(--accent-coral)"></div><div><strong>Player 1</strong><span id="player1State">Active</span></div></div>
+          <div class="player-row"><div class="player-dot" style="background:var(--accent-cyan)"></div><div><strong>Player 2</strong><span id="player2State">Waiting</span></div></div>
+          <div class="player-row"><div class="player-dot" style="background:var(--accent-green)"></div><div><strong>Computer</strong><span id="botState">Off</span></div></div>
+        </div>
+      </section>
+      <section class="card">
+        <h2>Controls</h2>
+        <div class="button-list">
+          <button class="btn primary" id="newGameBtn">New Game</button>
+          <button class="btn secondary" id="aiBtn">Computer: Off</button>
+          <button class="btn warn" id="resetThemeBtn">Reset Theme</button>
+        </div>
+      </section>
+      <section class="card">
+        <h2>Shortcuts</h2><div class="shortcuts">R or N  -  restart the board
+Space   -  toggle computer control
+Esc     -  close the page</div>
+      </section>
+      <div class="footer">Single-file HTML version of the desktop game.</div>
+    </aside>
+  </div>
+  <script>
+    const THEMES={Neural:{bg:"#0d1117",panel:"#141a22",card:"#1a222d",tile:"#171f28",tileHover:"#1d2732",tileWin:"#142a31",border:"#2a3441",text:"#eef2f6",muted:"#93a0b1",cyan:"#82c9d6",green:"#7ac3a3",coral:"#c09a82",gold:"#b6ab7a",white:"#fbfcfd"},Classic:{bg:"#111418",panel:"#171c22",card:"#20262e",tile:"#1d232b",tileHover:"#232a33",tileWin:"#1c2a29",border:"#2f3742",text:"#f2f5f8",muted:"#a6b0bb",cyan:"#88aeda",green:"#73c39a",coral:"#c39a7e",gold:"#b9ab6f",white:"#fcfcfd"},Bank:{bg:"#0d141d",panel:"#151d29",card:"#1a2431",tile:"#172130",tileHover:"#1d2737",tileWin:"#143130",border:"#304054",text:"#f2f6fb",muted:"#9baab9",cyan:"#89add3",green:"#7fbea0",coral:"#c0a07c",gold:"#c9ba86",white:"#ffffff"},Grocery:{bg:"#101612",panel:"#171f1a",card:"#202a23",tile:"#1b241f",tileHover:"#212c26",tileWin:"#18342d",border:"#324237",text:"#f1f5f2",muted:"#9fb0a4",cyan:"#89c7a9",green:"#a0ca7a",coral:"#c3a27c",gold:"#c4c883",white:"#fcfdfb"},Cafe:{bg:"#19120f",panel:"#221913",card:"#2c221a",tile:"#241b16",tileHover:"#2c221c",tileWin:"#2a2318",border:"#433326",text:"#fcf7f1",muted:"#c0ab9c",cyan:"#c2a38f",green:"#8fc2a0",coral:"#c89068",gold:"#d1bf79",white:"#fffdfb"},Studio:{bg:"#10131a",panel:"#181d27",card:"#202735",tile:"#1a2130",tileHover:"#222939",tileWin:"#1b2d2c",border:"#31394b",text:"#f4f7fb",muted:"#a3adbf",cyan:"#8ca4d8",green:"#75c5a8",coral:"#c69a7b",gold:"#c4b07a",white:"#ffffff"}};
+    const state={theme:"Neural",board:Array(9).fill(""),current:"X",aiSymbol:null,gameOver:false,winningLine:[],hoverIndex:-1,lastMove:-1,scores:{X:0,O:0,Draw:0},aiTimer:null};
+    const els={root:document.documentElement,themeRow:document.getElementById("themeRow"),board:document.getElementById("board"),winLine:document.getElementById("winLine"),boardWrap:document.getElementById("boardWrap"),modePill:document.getElementById("modePill"),turnBanner:document.getElementById("turnBanner"),statusMain:document.getElementById("statusMain"),statusDetail:document.getElementById("statusDetail"),scoreX:document.getElementById("scoreX"),scoreO:document.getElementById("scoreO"),scoreDraw:document.getElementById("scoreDraw"),player1State:document.getElementById("player1State"),player2State:document.getElementById("player2State"),botState:document.getElementById("botState"),newGameBtn:document.getElementById("newGameBtn"),aiBtn:document.getElementById("aiBtn"),resetThemeBtn:document.getElementById("resetThemeBtn")};
+    function pieceSvg(inner){return `<svg viewBox="0 0 100 100" class="piece" aria-hidden="true">${inner}</svg>`}
+    function theme(){return THEMES[state.theme]}
+    function setVars(){const t=theme(),r=els.root.style;r.setProperty("--bg",t.bg);r.setProperty("--panel",t.panel);r.setProperty("--card",t.card);r.setProperty("--tile",t.tile);r.setProperty("--tile-hover",t.tileHover);r.setProperty("--tile-win",t.tileWin);r.setProperty("--border",t.border);r.setProperty("--text",t.text);r.setProperty("--muted",t.muted);r.setProperty("--accent-cyan",t.cyan);r.setProperty("--accent-green",t.green);r.setProperty("--accent-coral",t.coral);r.setProperty("--accent-gold",t.gold);r.setProperty("--accent-white",t.white)}
+    function piece(symbol,win=false){const t=theme(),s=win?t.white:(symbol==="X"?t.coral:t.cyan);const other=win?t.white:(symbol==="X"?t.green:t.gold);return symbol==="X"?pieceSvg(`<line x1="24" y1="24" x2="76" y2="76" stroke="${s}" stroke-width="12" stroke-linecap="round"/><line x1="76" y1="24" x2="24" y2="76" stroke="${other}" stroke-width="12" stroke-linecap="round"/>`):pieceSvg(`<circle cx="50" cy="50" r="24" fill="none" stroke="${s}" stroke-width="12"/><circle cx="50" cy="50" r="14" fill="${other}" opacity=".9"/>`)}
+    function buildThemeButtons(){els.themeRow.innerHTML="";Object.keys(THEMES).forEach(name=>{const b=document.createElement("button");b.className="theme-chip"+(name===state.theme?" active":"");b.textContent=name;b.onclick=()=>setTheme(name);els.themeRow.appendChild(b)})}
+    function setTheme(name){state.theme=name;setVars();buildThemeButtons();render()}
+    function other(s){return s==="X"?"O":"X"}
+    function winnerSymbol(board){const lines=[[0,1,2],[3,4,5],[6,7,8],[0,3,6],[1,4,7],[2,5,8],[0,4,8],[2,4,6]];for(const line of lines){const[a,b,c]=line;if(board[a]&&board[a]===board[b]&&board[a]===board[c])return{symbol:board[a],line}}return null}
+    function statusText(){if(!state.aiSymbol)return state.current==="X"?"Player 1 turn (X)":"Player 2 turn (O)";return state.current===state.aiSymbol?`Computer to move (${state.current})`:`Player turn (${state.current})`}
+    function refreshSidebar(){const aiOn=!!state.aiSymbol;els.modePill.textContent=aiOn?"Human vs Computer":"Human vs Human";els.turnBanner.textContent=statusText();els.statusMain.textContent=state.gameOver?(state.winningLine.length?`${winnerSymbol(state.board).symbol} wins the round`:"Draw game"):statusText();els.statusDetail.textContent=state.gameOver?(state.winningLine.length?"Press New Game to start a fresh board.":"Every square is filled. Start a new round to keep playing."):(aiOn?`Computer is controlling ${state.aiSymbol} and will move on that side.`:"Computer control is off. Two people can take turns locally.");els.scoreX.textContent=state.scores.X;els.scoreO.textContent=state.scores.O;els.scoreDraw.textContent=state.scores.Draw;els.player1State.textContent=aiOn?(state.aiSymbol==="X"?"Computer turn":(state.current==="X"?"Human turn":"Waiting")):(state.current==="X"?"Active":"Waiting");els.player2State.textContent=aiOn?(state.aiSymbol==="O"?"Computer turn":(state.current==="O"?"Human turn":"Waiting")):(state.current==="O"?"Active":"Waiting");els.botState.textContent=aiOn?`Computer playing as ${state.aiSymbol}`:"Off";els.aiBtn.textContent=`Computer: ${aiOn?state.aiSymbol:"Off"}`}
+    function clearAiTimer(){if(state.aiTimer){clearTimeout(state.aiTimer);state.aiTimer=null}}
+    function makeTile(i){const b=document.createElement("button");b.className="tile";b.onmouseenter=()=>{if(state.board[i]||state.gameOver)return;state.hoverIndex=i;renderBoard()};b.onmouseleave=()=>{if(state.hoverIndex===i){state.hoverIndex=-1;renderBoard()}};b.onclick=()=>makeMove(i);return b}
+    function initBoard(){els.board.innerHTML="";for(let i=0;i<9;i++)els.board.appendChild(makeTile(i))}
+    function newGame(){clearAiTimer();state.board=Array(9).fill("");state.current="X";state.gameOver=false;state.winningLine=[];state.hoverIndex=-1;state.lastMove=-1;render();scheduleAi()}
+    function toggleAi(){state.aiSymbol=state.aiSymbol?null:"O";render();scheduleAi()}
+    function scheduleAi(){if(!state.aiSymbol||state.gameOver||state.current!==state.aiSymbol)return;clearAiTimer();els.turnBanner.textContent=`Computer turn (${state.current})`;state.aiTimer=setTimeout(()=>{state.aiTimer=null;const move=bestAiMove();if(move!==null)makeMove(move,true)},700)}
+    function makeMove(i,byAi=false){if(state.gameOver||state.board[i])return false;if(state.aiSymbol===state.current&&!byAi)return false;state.board[i]=state.current;state.lastMove=i;const w=winnerSymbol(state.board);if(w){state.gameOver=true;state.winningLine=w.line;state.scores[w.symbol]++;render();return true}if(state.board.every(Boolean)){state.gameOver=true;state.scores.Draw++;state.winningLine=[];render();return true}state.current=other(state.current);render();scheduleAi();return true}
+    function bestAiMove(){const ai=state.aiSymbol;if(!ai)return null;const human=other(ai),preferred=[4,0,2,6,8,1,3,5,7];const ordered=b=>preferred.filter(i=>!b[i]);function score(board,turn,alpha,beta,depth){const w=winnerSymbol(board);if(w?.symbol===ai)return 100-depth;if(w?.symbol===human)return depth-100;if(board.every(Boolean))return 0;const moves=ordered(board);if(turn===ai){let best=-1e3;for(const i of moves){const n=board.slice();n[i]=turn;best=Math.max(best,score(n,human,alpha,beta,depth+1));alpha=Math.max(alpha,best);if(beta<=alpha)break}return best}let best=1e3;for(const i of moves){const n=board.slice();n[i]=turn;best=Math.min(best,score(n,ai,alpha,beta,depth+1));beta=Math.min(beta,best);if(beta<=alpha)break}return best}let best=-1e3,choices=[];for(const move of ordered(state.board)){const n=state.board.slice();n[move]=ai;const val=score(n,human,-1e3,1e3,1);if(val>best){best=val;choices=[move]}else if(val===best)choices.push(move)}return choices.length?choices[Math.floor(Math.random()*choices.length)]:null}
+    function renderBoard(){const tiles=[...els.board.children];tiles.forEach((tile,i)=>{const s=state.board[i],win=state.winningLine.includes(i),last=i===state.lastMove&&!!s,hover=i===state.hoverIndex&&!s&&!state.gameOver;tile.className="tile"+(s?" locked":"")+(win?" win":"")+(last?" last":"");tile.innerHTML=s?piece(s,win):"";tile.style.background=hover?"var(--tile-hover)":""});if(state.winningLine.length===3){const a=tiles[state.winningLine[0]].getBoundingClientRect(),c=tiles[state.winningLine[2]].getBoundingClientRect(),w=els.boardWrap.getBoundingClientRect();const x1=a.left+a.width/2-w.left,y1=a.top+a.height/2-w.top,x2=c.left+c.width/2-w.left,y2=c.top+c.height/2-w.top;els.winLine.setAttribute("viewBox",`0 0 ${w.width} ${w.height}`);els.winLine.innerHTML=`<line x1="${x1}" y1="${y1}" x2="${x2}" y2="${y2}" stroke="var(--accent-green)" stroke-width="14" stroke-linecap="round"/><line x1="${x1}" y1="${y1}" x2="${x2}" y2="${y2}" stroke="var(--accent-white)" stroke-width="4" stroke-linecap="round"/>`}else els.winLine.innerHTML=""}
+    function render(){refreshSidebar();renderBoard()}
+    function resetTheme(){setTheme("Neural")}
+    window.addEventListener("keydown",e=>{if(e.key==="Escape")window.close();if(["r","R","n","N"].includes(e.key))newGame();if(e.key===" "){e.preventDefault();toggleAi()}})
+    window.addEventListener("resize",()=>{if(state.winningLine.length===3)renderBoard()})
+    els.newGameBtn.onclick=newGame;els.aiBtn.onclick=toggleAi;els.resetThemeBtn.onclick=resetTheme;
+    buildThemeButtons();setVars();initBoard();render();
+  </script>
+</body>
+</html>
